@@ -1,0 +1,1 @@
+<script lang="ts" context="module"> export class Foo { value = $state("I'm a value ") } </script>

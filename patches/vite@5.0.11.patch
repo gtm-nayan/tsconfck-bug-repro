@@ -1,0 +1,103 @@
+diff --git a/dist/node/chunks/dep-V3BH7oO1.js b/dist/node/chunks/dep-V3BH7oO1.js
+index 628c10d380dd760b1f5f54baddbaa37747b335d6..738344d40dbed062acac7a2e78aa55635963c1c1 100644
+--- a/dist/node/chunks/dep-V3BH7oO1.js
++++ b/dist/node/chunks/dep-V3BH7oO1.js
+@@ -13941,7 +13941,19 @@ async function parse$f(filename, options) {
+ 	/** @type {import('./cache.js').TSConfckCache} */
+ 	const cache = options?.cache;
+ 	if (cache?.hasParseResult(filename)) {
+-		return cache.getParseResult(filename);
++		const result = await cache.getParseResult(filename);
++		if (
++			(result.tsconfig.extends && !result.extended) ||
++			(result.tsconfig.references && !result.referenced)
++		) {
++			const promise = Promise.all([
++				parseExtends(result, cache),
++				parseReferences(result, options)
++			]).then(() => result);
++			cache.setParseResult(filename, promise);
++			await promise;
++		}
++		return result;
+ 	}
+ 	const {
+ 		resolve,
+@@ -13960,16 +13972,26 @@ async function parse$f(filename, options) {
+ 		let result;
+ 		if (filename !== tsconfigFile && cache?.hasParseResult(tsconfigFile)) {
+ 			result = await cache.getParseResult(tsconfigFile);
++      if (
++        (result.tsconfig.extends && !result.extended) ||
++        (result.tsconfig.references && !result.referenced)
++      ) {
++        const promise = Promise.all([
++          parseExtends(result, cache),
++          parseReferences(result, options)
++        ]).then(() => result);
++        cache.setParseResult(filename, promise);
++        await promise;
++      }
+ 		} else {
+ 			result = await parseFile$1(tsconfigFile, cache, filename === tsconfigFile);
+ 			await Promise.all([parseExtends(result, cache), parseReferences(result, options)]);
+ 		}
+ 		resolve(resolveSolutionTSConfig(filename, result));
+-		return promise;
+ 	} catch (e) {
+ 		reject(e);
+-		return promise;
+ 	}
++  return promise;
+ }
+ 
+ /**
+@@ -14119,23 +14141,24 @@ async function parseExtends(result, cache) {
+  * @returns {string}
+  */
+ function resolveExtends(extended, from) {
++	if (extended === '..') {
++		// see #149
++		extended = '../tsconfig.json';
++	}
++	const req = createRequire(from);
+ 	let error;
+-
+ 	try {
+-		return createRequire$2(from).resolve(extended);
++		return req.resolve(extended);
+ 	} catch (e) {
+ 		error = e;
+ 	}
+-
+-	if (!path$o.isAbsolute(extended) && !extended.startsWith('./') && !extended.startsWith('../')) {
++	if (extended[0] !== '.' && !path.isAbsolute(extended)) {
+ 		try {
+-			const fallbackExtended = path$o.join(extended, 'tsconfig.json');
+-			return createRequire$2(from).resolve(fallbackExtended);
++			return req.resolve(`${extended}/tsconfig.json`);
+ 		} catch (e) {
+ 			error = e;
+ 		}
+ 	}
+-
+ 	throw new TSConfckParseError(
+ 		`failed to resolve "extends":"${extended}" in ${from}`,
+ 		'EXTENDS_RESOLVE',
+@@ -14774,15 +14797,7 @@ function prettifyMessage(m, code) {
+ let tsconfckCache;
+ async function loadTsconfigJsonForFile(filename) {
+     try {
+-        if (tsconfckCache) {
+-            // shortcut, the cache stores resolved TSConfckParseResult
+-            // so getting it from the cache directly we bypass async fn call wrapping it in a promise again
+-            if (tsconfckCache.hasParseResult(filename)) {
+-                const result = await tsconfckCache.getParseResult(filename);
+-                return result.tsconfig;
+-            }
+-        }
+-        else {
++        if (!tsconfckCache) {
+             tsconfckCache = new TSConfckCache();
+         }
+         const result = await parse$f(filename, {
